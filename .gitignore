@@ -1,0 +1,10 @@
+node_modules/
+dist/
+*.log
+.DS_Store
+
+# Perfil Playwright (contiene cookies de sesión)
+aeat-profile/
+
+# Logs
+audit-log/
