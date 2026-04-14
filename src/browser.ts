@@ -4,9 +4,23 @@
 
 import { chromium, type Browser, type BrowserContext, type Page } from "playwright";
 import { join } from "node:path";
+import { homedir, platform } from "node:os";
 import { existsSync, readFileSync, writeFileSync, unlinkSync, mkdirSync } from "node:fs";
 
-const PROFILE_DIR = join(process.cwd(), "aeat-profile");
+function appDataDir(): string {
+  const home = homedir();
+  switch (platform()) {
+    case "darwin":
+      return join(home, "Library", "Application Support", "hacienda-cli");
+    case "win32":
+      return join(home, "AppData", "Roaming", "hacienda-cli");
+    default:
+      return join(home, ".config", "hacienda-cli");
+  }
+}
+
+const APP_DIR = appDataDir();
+const PROFILE_DIR = join(APP_DIR, "aeat-profile");
 const CDP_PORT_FILE = join(PROFILE_DIR, ".cdp-port");
 const CDP_PORT = 9223;
 

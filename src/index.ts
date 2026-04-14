@@ -4,9 +4,13 @@
 // Nunca presenta, firma ni envía la declaración.
 
 import { Command } from "commander";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { execSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
+
+import { downloadModelo100Artifacts } from "./aeat/download.js";
+import { uploadXmlToEdfi } from "./aeat/upload.js";
 
 const program = new Command();
 
@@ -33,7 +37,7 @@ const MODELOS: Record<
 > = {
   "100": {
     name: "IRPF - Impuesto sobre la Renta de las Personas Físicas",
-    xsd: "Renta2025.xsd",
+    xsd: "Renta2025-fixed.xsd",
     dict: "diccionarioXSD_2025.properties",
     // EDFI = interfaz de presentación mediante fichero (importar/exportar XML)
     edfiUrl: "https://www6.agenciatributaria.gob.es/wlpl/PARE-RW25/EDFI/index.zul",
@@ -44,7 +48,7 @@ const MODELOS: Record<
 };
 
 function dataDir(): string {
-  return join(new URL(".", import.meta.url).pathname, "..", "data");
+  return join(fileURLToPath(new URL(".", import.meta.url)), "..", "data");
 }
 
 // ── login ──────────────────────────────────────────────────────────
@@ -119,128 +123,21 @@ program
     console.log("Conectando al navegador...");
     const { page } = await ensureBrowser();
 
-    // Handle beforeunload dialogs automatically
-    page.on("dialog", (d) => d.accept().catch(() => {}));
-
     const outDir = resolve(opts.output);
-
-    // ── Paso 1: Datos fiscales (HTML) ─────────────────────────────
-    const datosFiscalesUrl = "https://www6.agenciatributaria.gob.es/wlpl/DFPA-D182/SvVisDF25Net";
-    console.log("Descargando datos fiscales...");
-    await page.goto(datosFiscalesUrl, { waitUntil: "networkidle" }).catch(() => {});
-
-    // Detectar sesión caducada
-    if (/SesionCaducada|ObtenerClave/i.test(page.url())) {
-      console.error("✗ Sesión caducada. Ejecuta 'hacienda login' primero.");
-      process.exit(1);
-    }
-
-    // Esperar a que cargue el contenido (buscar encabezado de datos fiscales)
+    let htmlFile = "";
+    let pdfFile = "";
     try {
-      await page.locator("text=Consulta de Datos Fiscales").waitFor({ timeout: 15000 });
-    } catch {
-      console.error("✗ No se pudo cargar la página de datos fiscales.");
-      console.error(`  URL actual: ${page.url()}`);
-      process.exit(1);
-    }
-
-    // Extraer el HTML del contenido principal (sin cabecera/pie de la sede)
-    const datosFiscalesHtml = await page.evaluate(() => {
-      const main = document.querySelector("main") || document.body;
-      return main.innerHTML;
-    });
-
-    const htmlFile = join(outDir, `datos-fiscales-${modelo}-2025.html`);
-    const htmlWrapper =
-      `<!DOCTYPE html><html lang="es"><head><meta charset="utf-8">` +
-      `<title>Datos Fiscales ${modelo} - 2025</title>` +
-      `<style>body{font-family:sans-serif;margin:2em}table{border-collapse:collapse;width:100%;margin:1em 0}` +
-      `td,th{border:1px solid #ccc;padding:4px 8px;text-align:left}h2{margin-top:2em;color:#333}</style>` +
-      `</head><body>${datosFiscalesHtml}</body></html>`;
-    writeFileSync(htmlFile, htmlWrapper);
-    console.log(`✓ Datos fiscales: ${htmlFile}`);
-
-    // ── Paso 2: PDF del borrador ──────────────────────────────────
-    console.log("Abriendo Renta WEB...");
-    await page.goto(m.rentaWebUrl, { waitUntil: "networkidle" }).catch(() => {});
-
-    // Si hay sesión previa, continuar; si no, nueva declaración
-    const continuar = page.locator('button:has-text("Continuar sesión")');
-    const nuevaDecl = page.locator('button:has-text("Nueva declaración")');
-    try {
-      await Promise.race([
-        continuar.waitFor({ state: "visible", timeout: 10000 }),
-        nuevaDecl.waitFor({ state: "visible", timeout: 10000 }),
-      ]);
-    } catch {
-      // Puede que ya estemos en el resumen directamente
-    }
-
-    if (await continuar.isVisible().catch(() => false)) {
-      console.log("Continuando sesión existente...");
-      await continuar.click();
-    } else if (await nuevaDecl.isVisible().catch(() => false)) {
-      console.log("Iniciando nueva declaración...");
-      await nuevaDecl.click();
-    }
-
-    // Esperar a que cargue el resumen
-    console.log("Esperando a que cargue el borrador...");
-    const vistaPrevia = page.locator("#VistapreviaXML");
-    try {
-      await vistaPrevia.waitFor({ state: "visible", timeout: 20000 });
-    } catch {
-      console.error("✗ No se encontró el botón 'Vista previa'.");
-      console.error("  ¿Estás autenticado? Ejecuta 'hacienda login' primero.");
-      console.error(`  URL actual: ${page.url()}`);
-      process.exit(1);
-    }
-
-    // Click "Vista previa" para generar el PDF
-    console.log("Generando vista previa PDF...");
-    await vistaPrevia.click();
-
-    // Esperar a que aparezca el iframe con el PDF
-    const pdfIframe = page.locator('iframe[src*="PDFborrador.pdf"]');
-    try {
-      await pdfIframe.waitFor({ state: "attached", timeout: 20000 });
-    } catch {
-      console.error("✗ No se generó el PDF. Puede que haya errores en la declaración.");
-      process.exit(1);
-    }
-
-    const pdfUrl = await pdfIframe.getAttribute("src");
-    if (!pdfUrl) {
-      console.error("✗ No se pudo obtener la URL del PDF.");
-      process.exit(1);
-    }
-
-    // Descargar el PDF dentro del contexto del navegador (preserva cookies de sesión)
-    console.log("Descargando PDF...");
-    const pdfBase64: string = await page.evaluate(async (url) => {
-      const resp = await fetch(url);
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-      const blob = await resp.blob();
-      return new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => {
-          const dataUrl = reader.result as string;
-          resolve(dataUrl.split(",")[1]);
-        };
-        reader.onerror = reject;
-        reader.readAsDataURL(blob);
+      const result = await downloadModelo100Artifacts({
+        modelo,
+        outDir,
+        page,
+        rentaWebUrl: m.rentaWebUrl,
       });
-    }, pdfUrl);
-
-    const pdfFile = join(outDir, `borrador-${modelo}-2025.pdf`);
-    const pdfBuffer = Buffer.from(pdfBase64, "base64");
-    writeFileSync(pdfFile, pdfBuffer);
-    console.log(`✓ Borrador PDF: ${pdfFile} (${Math.round(pdfBuffer.length / 1024)} KB)`);
-
-    // Volver a la declaración
-    const volver = page.locator('button:has-text("Volver a declaración")');
-    if (await volver.isVisible({ timeout: 2000 }).catch(() => false)) {
-      await volver.click();
+      htmlFile = result.htmlFile;
+      pdfFile = result.pdfFile;
+    } catch (error: any) {
+      console.error(`✗ ${error.message}`);
+      process.exit(1);
     }
 
     // Desconectar del navegador para que el proceso termine
@@ -282,43 +179,37 @@ program
       }
     }
 
-    const { ensureBrowser, closeBrowser } = await import("./browser.js");
+    const { ensureBrowser } = await import("./browser.js");
 
     console.log("Conectando al navegador...");
     const { page } = await ensureBrowser();
 
-    // Navegar a EDFI (presentación mediante fichero)
-    await page.goto(m.edfiUrl, { waitUntil: "networkidle" }).catch(() => {});
+    try {
+      const result = await uploadXmlToEdfi({
+        edfiUrl: m.edfiUrl,
+        page,
+        xmlFile,
+      });
 
-    // Click "Importar Xml"
-    await page.evaluate(() => {
-      const b = Array.from(document.querySelectorAll<HTMLButtonElement>("button, a")).find(
-        (b) => b.offsetParent !== null && /Importar\s*Xml/i.test(b.textContent || ""),
-      );
-      b?.click();
-    });
-    await page.waitForLoadState("networkidle").catch(() => {});
-
-    // Buscar file input y subir el fichero
-    const fileInput = await page.$('input[type="file"]');
-    if (fileInput) {
-      await fileInput.setInputFiles(resolve(xmlFile));
-      await page.waitForLoadState("networkidle").catch(() => {});
-      console.log("✓ XML importado. Revisa el resultado en el navegador.");
-      console.log(`  URL: ${m.edfiUrl}`);
-    } else {
-      // Puede que "Importar Xml" abra directamente un file picker del OS
-      // Intentar via page.setInputFiles en cualquier input file oculto
-      const hiddenInput = await page.$('input[type="file"]');
-      if (hiddenInput) {
-        await hiddenInput.setInputFiles(resolve(xmlFile));
-        await page.waitForLoadState("networkidle").catch(() => {});
-        console.log("✓ XML importado.");
+      if (result.status === "accepted") {
+        console.log(`✓ XML aceptado por EDFI`);
+        console.log(`  Resultado de la declaración: ${result.resultado}`);
+      } else if (result.status === "messages") {
+        console.log(
+          `\n${result.rejected ? "✗ Fichero RECHAZADO" : "⚠ Importado con avisos"}. ${result.entries.length} mensajes:`,
+        );
+        for (const entry of result.entries) {
+          const icon =
+            entry.codigo.startsWith("FRECH") || entry.codigo.startsWith("ERES") ? "✗" : "⚠";
+          console.log(`  ${icon} [${entry.codigo}] ${entry.desc}`);
+        }
       } else {
-        console.log("⚠ No se encontró input de fichero.");
-        console.log("  Importa manualmente desde el navegador:");
-        console.log(`  ${m.edfiUrl}`);
+        console.log("⚠ Estado desconocido tras importar el XML.");
+        console.log(result.bodySnippet);
       }
+    } catch (error: any) {
+      console.error(`✗ ${error.message}`);
+      process.exit(1);
     }
 
     // NO cerrar el browser — el usuario quiere ver el resultado
