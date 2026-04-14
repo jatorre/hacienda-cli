@@ -1,20 +1,45 @@
 {
   "name": "hacienda-cli",
-  "version": "0.3.0",
-  "description": "CLI para interactuar con la sede electrónica de la AEAT. Descarga/sube declaraciones en formato XML oficial. Nunca presenta ni firma.",
+  "version": "1.0.0",
+  "description": "CLI para interactuar con la sede electrónica de la AEAT. Descarga datos fiscales, sube declaraciones XML (Modelo 100). Nunca presenta ni firma.",
   "type": "module",
   "bin": {
     "hacienda": "./dist/index.js"
   },
+  "files": [
+    "dist/",
+    "data/",
+    "scripts/",
+    ".claude/skills/",
+    "CLAUDE.md",
+    "README.md"
+  ],
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",
     "start": "node dist/index.js",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run build"
   },
   "engines": {
     "node": ">=20"
   },
+  "keywords": [
+    "aeat",
+    "hacienda",
+    "irpf",
+    "renta",
+    "modelo-100",
+    "declaracion",
+    "spain",
+    "tax",
+    "cli"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jatorre/hacienda-cli.git"
+  },
+  "homepage": "https://github.com/jatorre/hacienda-cli",
   "dependencies": {
     "commander": "^14.0.3",
     "playwright": "^1.48.0"
