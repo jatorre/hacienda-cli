@@ -8,3 +8,9 @@ aeat-profile/
 
 # Logs
 audit-log/
+
+# Ficheros descargados de la AEAT (contienen PII)
+borrador-*.pdf
+datos-fiscales-*.html
+declaracion-*.xml
+minimal-*.xml

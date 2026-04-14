@@ -12,7 +12,7 @@ fiscal (generar el XML) es responsabilidad del agente AI, no del CLI.
 
 ```bash
 hacienda login              # Abre Chromium, usuario se autentica, queda vivo
-hacienda download 100       # Descarga borrador como XML (pendiente de implementar bien)
+hacienda download 100       # Descarga borrador como PDF (vista previa desde Renta WEB)
 hacienda upload 100 f.xml   # Importa XML en EDFI de la AEAT
 hacienda validate 100 f.xml # Valida XML contra XSD oficial (offline, xmllint)
 hacienda info 100           # Muestra XSD, diccionario, URLs
@@ -38,8 +38,8 @@ El XML debe conformar a `Renta2025.xsd`. Estructura raíz:
   </Aux>
   <DatosIdentificativos>...</DatosIdentificativos>
   <AsignacionTributaria>...</AsignacionTributaria>   <!-- opcional -->
-  <DatosEconomicos codigoCADeclaracion="13" TIPOTRIBUTACION="1">
-    <TomaDatosAmpliada codigoCA="13" titular="2" nif="...">
+  <DatosEconomicos codigoCADeclaracion="12" TIPOTRIBUTACION="1">
+    <TomaDatosAmpliada codigoCA="12" titular="2" nif="...">
       <RdtoTrabajo>...</RdtoTrabajo>
       <RdtoCapitalMobiliario>...</RdtoCapitalMobiliario>
       <Inmuebles>...</Inmuebles>
@@ -58,7 +58,7 @@ El XML debe conformar a `Renta2025.xsd`. Estructura raíz:
 - **EstadoCivil**: 1=soltero, 2=casado, 3=viudo, 4=separado/divorciado
 - **Sexo**: H=hombre, M=mujer
 - **Titular**: 2=declarante, 3=cónyuge, 4-7=hijos
-- **codigoCA** (comunidad autónoma): 01=Andalucía, 02=Aragón, 03=Asturias, 04=Baleares, 05=Canarias, 06=Cantabria, 07=C. León, 08=C. La Mancha, 09=Cataluña, 10=Extremadura, 11=Galicia, 12=La Rioja, 13=Madrid, 16=Murcia, 17=Navarra, 18=País Vasco, 19=Valencia, 20=Ceuta y Melilla
+- **codigoCA** (comunidad autónoma): 01=Andalucía, 02=Aragón, 03=Asturias, 04=Baleares, 05=Canarias, 06=Cantabria, 07=C. La Mancha, 08=C. León, 09=Cataluña, 10=Extremadura, 11=Galicia, 12=Madrid, 13=Murcia, 16=La Rioja, 17=C. Valenciana, 18=Ceuta, 19=Melilla, 20=No residente
 - **TIPOTRIBUTACION**: 1=individual, 2=conjunta
 
 ### Validación local
@@ -86,8 +86,16 @@ con escapes incorrectos que xmllint no acepta.
 
 ## Pendientes
 
-- [ ] `download 100` — descargar el borrador actual como XML
+- [x] `download 100` — descarga el borrador como PDF (vista previa de Renta WEB)
 - [ ] `validate --remote` — subir a EDFI y capturar errores del servidor
-- [ ] Generar XML completo de ejemplo a partir del XSD
-- [ ] Explorar si EDFI precarga datos fiscales al importar un XML mínimo con NIF
+- [x] Explorar si EDFI precarga datos fiscales → **NO**, EDFI solo valida XML importado
 - [ ] Skill para agentes AI con el contexto del XSD + diccionario
+
+## Descubrimientos de ingeniería inversa
+
+- **No hay exportar XML**: ni Renta WEB ni EDFI ofrecen exportar el borrador como XML.
+- **EDFI y Renta WEB son apps ZK independientes**: no comparten sesión/estado.
+- **EDFI no precarga datos fiscales**: al importar XML con un NIF, no fusiona con datos fiscales del contribuyente.
+- **Download = PDF**: el borrador se obtiene como PDF via "Vista previa" en Renta WEB. El PDF se sirve en un iframe temporal (`/zkau/view/.../PDFborrador.pdf`).
+- **tipo_logico = "0"/"1"** (no "S"/"N"); **tipo_SINO_Exclusivo = "SI"/"NO"**.
+- **EDFI valida Resultados**: rechaza XMLs donde los cálculos del servidor no coinciden con los declarados.

@@ -57,17 +57,19 @@ export async function ensureBrowser(): Promise<{ context: BrowserContext; page: 
   process.exit(1);
 }
 
-export async function closeBrowser(): Promise<void> {
+/** Desconecta del navegador sin cerrarlo. Permite que el proceso node termine. */
+export async function disconnectBrowser(): Promise<void> {
   if (connectedBrowser) {
     connectedBrowser.close().catch(() => {});
     connectedBrowser = null;
   }
-  if (context && !connectedBrowser) {
-    await context.close().catch(() => {});
-    try { unlinkSync(CDP_PORT_FILE); } catch {}
-  }
   context = null;
   page = null;
+}
+
+export async function closeBrowser(): Promise<void> {
+  await disconnectBrowser();
+  try { unlinkSync(CDP_PORT_FILE); } catch {}
 }
 
 export async function getSessionStatus(): Promise<{
