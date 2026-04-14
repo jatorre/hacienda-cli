@@ -201,6 +201,122 @@ Esto es al revés que en GPOtrosInmuebles (donde FECHA1INMNA = adquisición).
 </ElementoInmueble>
 ```
 
+### Criptomonedas (GPOtrosCriptomonedas)
+
+Plataformas comunes: Binance, Coinbase, Kraken, Bit2Me, Crypto.com.
+Cada operación de venta/permuta es una transmisión patrimonial.
+
+```xml
+<GPOtrosCriptomonedas>
+  <ElementoCriptomoneda>
+    <CRIPTODE>BITCOIN</CRIPTODE>               <!-- descripción -->
+    <CRIPTOVT>15000.00</CRIPTOVT>              <!-- valor transmisión -->
+    <CRIPTOVA>10000.00</CRIPTOVA>              <!-- valor adquisición -->
+    <CRIPTOG>5000.00</CRIPTOG>                 <!-- ganancia -->
+    <!-- O si pérdida: -->
+    <CRIPTOP>2000.00</CRIPTOP>                 <!-- pérdida -->
+  </ElementoCriptomoneda>
+</GPOtrosCriptomonedas>
+```
+
+Método FIFO obligatorio. Cada permuta cripto→cripto es una transmisión fiscalmente relevante.
+
+### Alquiler de inmuebles (InmuebleArrendado)
+
+Dentro de cada `<Inmueble>`, se puede declarar alquiler:
+
+```xml
+<Inmueble>
+  <PC>100</PC>
+  <CURBA>1</CURBA>
+  <CL>1</CL>
+  <RC>1234567AB1234C0001XY</RC>
+  <CDIRECCION>CALLE EJEMPLO 1</CDIRECCION>
+  <VACATOT>150000.00</VACATOT>
+  <InmuebleArrendado>
+    <USOARR>1</USOARR>
+    <DatosArrendamiento>
+      <C_DIASARR>365</C_DIASARR>
+      <Arrendamiento>
+        <ElemTAR><TAR1>1</TAR1></ElemTAR>      <!-- vivienda habitual del inquilino -->
+        <V02II>12000.00</V02II>                 <!-- ingresos íntegros anuales -->
+        <V02RET>0.00</V02RET>                   <!-- retenciones -->
+        <V02GCOM>800.00</V02GCOM>               <!-- gastos comunidad -->
+        <V02PRIMCONTRA>400.00</V02PRIMCONTRA>   <!-- seguros -->
+        <V02TASA>500.00</V02TASA>               <!-- IBI y tasas -->
+        <V02OG>1200.00</V02OG>                  <!-- otros gastos deducibles -->
+      </Arrendamiento>
+    </DatosArrendamiento>
+  </InmuebleArrendado>
+</Inmueble>
+```
+
+Reducción del 50-90% del rendimiento neto si es vivienda habitual del inquilino
+(depende del contrato y zona tensionada).
+
+### Planes de pensiones (reducción base imponible)
+
+Las aportaciones a planes de pensiones reducen la base imponible general.
+Van dentro de `RendimientoTrabajo`:
+
+```xml
+<RendimientoTrabajo>
+  <IDII>50000.00</IDII>
+  <IDRE>10000.00</IDRE>
+  <IEIP>1500.00</IEIP>       <!-- contribuciones empresariales a planes de pensiones -->
+  <REGIMEN>1</REGIMEN>        <!-- solo si hay aportaciones del promotor -->
+  <GSS>3000.00</GSS>
+</RendimientoTrabajo>
+```
+
+Límite anual: 1.500 EUR aportaciones individuales + 8.500 EUR contribuciones empresariales.
+
+### Doble imposición internacional (DOBIMPINT)
+
+Para dividendos y ganancias extranjeros con retención en origen:
+
+```xml
+<CalculoImpuesto>
+  <CuotaAutoliquidacion>
+    <DOBIMPINT>
+      <!-- Base del ahorro: rendimientos capital mobiliario extranjero -->
+      <VRBE1>
+        <RDTAHVRBE1>1755.90</RDTAHVRBE1>       <!-- renta bruta -->
+        <IEXAHVRBE1>290.89</IEXAHVRBE1>         <!-- impuesto pagado en extranjero -->
+      </VRBE1>
+      <!-- Base general: rendimientos trabajo en extranjero -->
+      <VRBG1>
+        <RTEXVRBG1>5000.00</RTEXVRBG1>          <!-- rendimiento neto trabajo extranjero -->
+        <IEXGVRBG1>750.00</IEXGVRBG1>           <!-- impuesto pagado -->
+      </VRBG1>
+    </DOBIMPINT>
+  </CuotaAutoliquidacion>
+</CalculoImpuesto>
+```
+
+Máximo 3 entradas por tipo (VRBE1-3 para ahorro, VRBG1-3 para general).
+
+## Plataformas y brokers comunes
+
+### Reportan a la AEAT (datos precargados en datos fiscales)
+- Bancos españoles: BBVA, Santander, CaixaBank, Bankinter, ING, Openbank
+- Brokers españoles: Renta 4, Andbank/Inversis, Self Bank
+- Fondos: Indexa Capital, MyInvestor, Finizens (vía gestora)
+
+### NO reportan a la AEAT (hay que añadir manualmente)
+- **DEGIRO** (Países Bajos) — acciones, ETFs. Informe Anual con G/P por ISIN.
+- **Interactive Brokers** (EEUU/Irlanda) — acciones, opciones, futuros.
+- **eToro** (Chipre) — acciones, CFDs, cripto.
+- **Trading 212** (Bulgaria) — acciones, CFDs.
+- **XTB** (Polonia) — acciones, CFDs.
+- **Revolut** (Lituania) — acciones, cripto.
+- **Binance, Coinbase, Kraken** — criptomonedas.
+- **Bit2Me** (España, pero no siempre precargado) — criptomonedas.
+
+Para brokers extranjeros: las operaciones van en GPAcciones con IT/IA.
+Si solo se tiene la G/P neta (sin desglose IT/IA), usar valores sintéticos:
+`IA = abs(G/P) + 1000`, `IT = IA + G/P`.
+
 ## Ciclo iterativo para Resultados (ERES)
 
 EDFI recalcula TODAS las casillas del servidor y rechaza el XML si los Resultados

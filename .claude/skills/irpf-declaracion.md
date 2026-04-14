@@ -38,8 +38,13 @@ Read both downloaded files. From the HTML, extract and present a summary:
 - **Préstamos**: mortgage data
 - **Rentas extranjeras**: foreign income notices
 
-Ask the user:
-- Is anything missing? (Foreign broker operations like DEGIRO, crypto, private equity, rental income)
+Ask the user about common items that AEAT does NOT have:
+- **Foreign brokers** (DEGIRO, Interactive Brokers, eToro, Trading 212, XTB, Revolut) — stock/ETF operations
+- **Crypto** (Binance, Coinbase, Kraken, Bit2Me, Crypto.com) — sales, swaps, staking
+- **Rental income** — if they rent out properties
+- **Private equity / SAFEs** — startup investments, acquisitions
+- **Foreign employment income** — work abroad during the year
+- **Pension plan contributions** — for base imponible reduction
 - Are there discrepancies with their records?
 - Do they have additional documents (broker annual reports, sale contracts)?
 
@@ -49,6 +54,13 @@ For items NOT in datos fiscales (foreign brokers, private sales, etc.):
 - Ask the user for PDFs, annual reports, or manual data
 - For each operation, collect: acquisition date/price, transmission date/price, commissions
 - For stock operations without IT/IA breakdown (only G/P known), use synthetic values: `IA = abs(G/P) + 1000`, `IT = IA + G/P`
+
+Common scenarios by platform:
+- **DEGIRO/IBKR**: Annual report PDF with G/P by ISIN → GPAcciones
+- **Binance/Coinbase**: Transaction history CSV → GPOtrosCriptomonedas (FIFO method)
+- **Rental income**: Monthly rent × 12, deductible expenses (IBI, community, insurance, repairs) → InmuebleArrendado
+- **Pension plans**: Annual certificate from the plan manager → IEIP in RendimientoTrabajo + RedBaseImponible
+- **Property sale**: Notarial deed with acquisition/transmission values → GPOtrosInmuebles
 
 ### Phase 4: Generate XML
 
@@ -104,10 +116,33 @@ Once EDFI accepts the XML, present the user with:
 
 Remind the user: this is a draft. To submit, they must do it manually through the AEAT website.
 
+## Common Tax Scenarios
+
+### Typical salaried employee
+Work income + bank interest + maybe a fund or stocks via Spanish broker. Most data precargado. Quick.
+
+### Investor with foreign brokers (DEGIRO, IBKR, eToro)
+All foreign operations must be added manually. Ask for the annual report PDF. Key: AEAT won't have acquisition prices for stocks bought through foreign brokers.
+
+### Crypto trader
+Every sale AND every swap (crypto-to-crypto) is a taxable event. FIFO method required. Can be hundreds of operations — suggest using transaction history CSV and aggregating by coin.
+
+### Landlord (alquiler)
+Rental income with deductible expenses. Reduction of 50-90% if tenant uses it as primary residence. Check if the area is a "zona tensionada" for the 90% reduction.
+
+### Property sale
+Acquisition value = purchase price + taxes + notary + registry. If inherited: value declared in succession tax. Capital gains may be exempt if reinvested in primary residence within 2 years.
+
+### Autónomos (self-employed)
+RegEstimaDirecta or RegEstimaObj sections. Complex — involves quarterly VAT/IRPF returns (models 303, 130). Beyond the scope of basic declaration help; suggest a tax advisor for this.
+
 ## Important Caveats
 
 - AEAT data may have errors (wrong acquisition prices, missing foreign operations)
-- Foreign brokers (DEGIRO, Interactive Brokers) don't report to AEAT — their data must be added manually
+- Foreign brokers (DEGIRO, Interactive Brokers, eToro, etc.) don't report to AEAT — their data must be added manually
 - Stock splits and corporate events affect acquisition prices but aren't reflected in broker annual reports
-- Double taxation deductions (doble imposición internacional) require declaring foreign withholdings
+- Double taxation deductions require declaring foreign withholdings separately
+- Crypto-to-crypto swaps are taxable events (not just crypto-to-fiat)
+- If foreign assets exceed 50,000 EUR, Modelo 721 may be required (informative, not in Modelo 100)
 - The declaration is NOT submitted by this tool — the user must review and present manually
+- This is not tax advice — for complex situations, recommend a professional tax advisor (asesor fiscal)
