@@ -1,6 +1,6 @@
 {
   "name": "hacienda-cli",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "CLI para interactuar con la sede electrónica de la AEAT. Descarga datos fiscales, sube declaraciones XML (Modelo 100). Nunca presenta ni firma.",
   "type": "module",
   "bin": {
@@ -19,6 +19,7 @@
     "dev": "tsc --watch",
     "start": "node dist/index.js",
     "typecheck": "tsc --noEmit",
+    "postinstall": "npx playwright install chromium",
     "prepublishOnly": "npm run build"
   },
   "engines": {
