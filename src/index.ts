@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // hacienda — CLI para interactuar con la sede electrónica de la AEAT.
-// Descarga y sube declaraciones en formato XML oficial (Renta2025.xsd).
+// Descarga datos fiscales y sube XML oficial para contraste en EDFI.
 // Nunca presenta, firma ni envía la declaración.
 
 import { Command } from "commander";
@@ -18,25 +18,28 @@ program
   .name("hacienda")
   .description(
     "CLI para interactuar con la sede electrónica de la Agencia Tributaria.\n\n" +
-      "Descarga/sube declaraciones en formato XML oficial.\n" +
+      "Descarga datos fiscales, valida XML y lo importa en EDFI para reconciliación.\n" +
       "Nunca presenta, firma ni envía la declaración.",
   )
   .version("0.3.0");
 
 // ── Modelo registry ────────────────────────────────────────────────
 // Extensible: añadir modelos aquí cuando se soporten.
-const MODELOS: Record<
-  string,
-  {
-    name: string;
-    xsd: string;
-    dict: string;
-    edfiUrl: string;
-    rentaWebUrl: string;
-  }
-> = {
+interface ModeloDef {
+  name: string;
+  format: "xml" | "boe";
+  xsd?: string;
+  dict?: string;
+  schema?: string; // JSON schema for BOE format (parsed from XLS)
+  edfiUrl?: string;
+  rentaWebUrl?: string;
+  patrimonioWebUrl?: string;
+}
+
+const MODELOS: Record<string, ModeloDef> = {
   "100": {
     name: "IRPF - Impuesto sobre la Renta de las Personas Físicas",
+    format: "xml",
     xsd: "Renta2025-fixed.xsd",
     dict: "diccionarioXSD_2025.properties",
     // EDFI = interfaz de presentación mediante fichero (importar/exportar XML)
@@ -44,6 +47,14 @@ const MODELOS: Record<
     // Renta WEB normal (borrador interactivo)
     rentaWebUrl:
       "https://www6.agenciatributaria.gob.es/wlpl/PARE-RW25/CONT/index.zul?TACCESO=NPROPIO&EJER=2025",
+  },
+  "714": {
+    name: "Impuesto sobre el Patrimonio",
+    format: "boe",
+    schema: "DR714_2025.json",
+    // Patrimonio WEB — formulario interactivo con botón "Importar" para fichero BOE
+    patrimonioWebUrl:
+      "https://www6.agenciatributaria.gob.es/wlpl/PAMW-M714/E2025/CONT/index.zul?TACCESO=NPROPIO&EJER=2025",
   },
 };
 
@@ -70,7 +81,7 @@ program
       "https://www6.agenciatributaria.gob.es/wlpl/PARE-RW25/CONT/index.zul?TACCESO=NPROPIO&EJER=2025";
     await page.goto(RENTA_URL, { waitUntil: "networkidle" }).catch(() => {});
 
-    console.log("Autentícate en la ventana del navegador (Cl@ve Móvil / PIN / certificado).");
+    console.log("Autentícate en la ventana del navegador con Cl@ve.");
     console.log("Después pulsa 'CONFIRMAR' en nombre propio y 'Continuar sesión' si aparece.");
     console.log("Esperando (máx 5 min)...\n");
 
@@ -131,7 +142,7 @@ program
         modelo,
         outDir,
         page,
-        rentaWebUrl: m.rentaWebUrl,
+        rentaWebUrl: m.rentaWebUrl!,
       });
       htmlFile = result.htmlFile;
       pdfFile = result.pdfFile;
@@ -151,65 +162,104 @@ program
 
 // ── upload ─────────────────────────────────────────────────────────
 program
-  .command("upload <modelo> <xmlFile>")
-  .description("Importa un XML en el borrador de la AEAT.")
-  .action(async (modelo, xmlFile) => {
+  .command("upload <modelo> <file>")
+  .description(
+    "Importa un fichero en la AEAT.\n" +
+      "Modelo 100: XML en EDFI.\n" +
+      "Modelo 714: fichero BOE en Patrimonio WEB.",
+  )
+  .action(async (modelo, file) => {
     const m = MODELOS[modelo];
     if (!m) {
       console.error(`Modelo ${modelo} no soportado.`);
       process.exit(1);
     }
 
-    if (!existsSync(xmlFile)) {
-      console.error(`Fichero no encontrado: ${xmlFile}`);
+    if (!existsSync(file)) {
+      console.error(`Fichero no encontrado: ${file}`);
       process.exit(1);
     }
 
-    // Validar contra XSD primero
-    const xsdPath = join(dataDir(), m.xsd);
-    if (existsSync(xsdPath)) {
-      console.log("Validando XML contra XSD...");
-      try {
-        execSync(`xmllint --schema "${xsdPath}" "${xmlFile}" --noout 2>&1`);
-        console.log("✓ XML válido.");
-      } catch (e: any) {
-        console.log("⚠ Validación XSD falló (xmllint):");
-        console.log("  " + (e.stdout?.toString() || e.message).slice(0, 500));
-        console.log("  Continuando igualmente...");
-      }
-    }
-
-    const { ensureBrowser } = await import("./browser.js");
-
-    console.log("Conectando al navegador...");
-    const { page } = await ensureBrowser();
-
-    try {
-      const result = await uploadXmlToEdfi({
-        edfiUrl: m.edfiUrl,
-        page,
-        xmlFile,
-      });
-
-      if (result.status === "accepted") {
-        console.log(`✓ XML aceptado por EDFI`);
-        console.log(`  Resultado de la declaración: ${result.resultado}`);
-      } else if (result.status === "messages") {
-        console.log(
-          `\n${result.rejected ? "✗ Fichero RECHAZADO" : "⚠ Importado con avisos"}. ${result.entries.length} mensajes:`,
-        );
-        for (const entry of result.entries) {
-          const icon =
-            entry.codigo.startsWith("FRECH") || entry.codigo.startsWith("ERES") ? "✗" : "⚠";
-          console.log(`  ${icon} [${entry.codigo}] ${entry.desc}`);
+    if (m.format === "xml") {
+      // Modelo 100 — XML via EDFI
+      const xsdPath = m.xsd ? join(dataDir(), m.xsd) : "";
+      if (xsdPath && existsSync(xsdPath)) {
+        console.log("Validando XML contra XSD...");
+        try {
+          execSync(`xmllint --schema "${xsdPath}" "${file}" --noout 2>&1`);
+          console.log("✓ XML válido.");
+        } catch (e: any) {
+          console.log("⚠ Validación XSD falló (xmllint):");
+          console.log("  " + (e.stdout?.toString() || e.message).slice(0, 500));
+          console.log("  Continuando igualmente...");
         }
-      } else {
-        console.log("⚠ Estado desconocido tras importar el XML.");
-        console.log(result.bodySnippet);
       }
-    } catch (error: any) {
-      console.error(`✗ ${error.message}`);
-      process.exit(1);
+
+      const { ensureBrowser } = await import("./browser.js");
+      console.log("Conectando al navegador...");
+      const { page } = await ensureBrowser();
+
+      try {
+        const result = await uploadXmlToEdfi({
+          edfiUrl: m.edfiUrl!,
+          page,
+          xmlFile: file,
+        });
+
+        if (result.status === "accepted") {
+          console.log(`✓ XML aceptado por EDFI`);
+          console.log(`  Resultado de la declaración: ${result.resultado}`);
+        } else if (result.status === "messages") {
+          console.log(
+            `\n${result.rejected ? "✗ Fichero RECHAZADO" : "⚠ Importado con avisos"}. ${result.entries.length} mensajes:`,
+          );
+          for (const entry of result.entries) {
+            const icon =
+              entry.codigo.startsWith("FRECH") || entry.codigo.startsWith("ERES") ? "✗" : "⚠";
+            console.log(`  ${icon} [${entry.codigo}] ${entry.desc}`);
+          }
+        } else {
+          console.log("⚠ Estado desconocido tras importar el XML.");
+          console.log(result.bodySnippet);
+        }
+      } catch (error: any) {
+        console.error(`✗ ${error.message}`);
+        process.exit(1);
+      }
+    } else if (m.format === "boe") {
+      // Modelo 714 — BOE file via Patrimonio WEB
+      const { uploadBoeToPatrimonio } = await import("./aeat/upload-patrimonio.js");
+      const { ensureBrowser } = await import("./browser.js");
+
+      console.log("Conectando al navegador...");
+      const { page } = await ensureBrowser();
+
+      try {
+        const result = await uploadBoeToPatrimonio({
+          patrimonioWebUrl: m.patrimonioWebUrl!,
+          page,
+          boeFile: file,
+        });
+
+        if (result.status === "accepted") {
+          console.log(`✓ Fichero BOE importado en Patrimonio WEB`);
+          console.log(`  ${result.resultado}`);
+        } else if (result.status === "messages") {
+          console.log(
+            `\n${result.rejected ? "✗ Fichero RECHAZADO" : "⚠ Importado con avisos"}. ${result.entries.length} mensajes:`,
+          );
+          for (const entry of result.entries) {
+            const icon = entry.tipo.toLowerCase().includes("error") ? "✗" : "⚠";
+            console.log(`  ${icon} [${entry.codigo}] ${entry.desc}`);
+          }
+        } else {
+          console.log("⚠ Estado desconocido tras importar el fichero.");
+          console.log(result.bodySnippet);
+        }
+      } catch (error: any) {
+        console.error(`✗ ${error.message}`);
+        process.exit(1);
+      }
     }
 
     // NO cerrar el browser — el usuario quiere ver el resultado
@@ -218,37 +268,61 @@ program
 
 // ── validate ───────────────────────────────────────────────────────
 program
-  .command("validate <modelo> <xmlFile>")
-  .description("Valida un XML contra el XSD oficial de la AEAT (offline).")
-  .action(async (modelo, xmlFile) => {
+  .command("validate <modelo> <file>")
+  .description(
+    "Valida un fichero offline.\n" +
+      "Modelo 100: XML contra XSD oficial (xmllint).\n" +
+      "Modelo 714: estructura BOE contra diseño de registro.",
+  )
+  .action(async (modelo, file) => {
     const m = MODELOS[modelo];
     if (!m) {
       console.error(`Modelo ${modelo} no soportado.`);
       process.exit(1);
     }
 
-    if (!existsSync(xmlFile)) {
-      console.error(`Fichero no encontrado: ${xmlFile}`);
+    if (!existsSync(file)) {
+      console.error(`Fichero no encontrado: ${file}`);
       process.exit(1);
     }
 
-    const xsdPath = join(dataDir(), m.xsd);
-    if (!existsSync(xsdPath)) {
-      console.error(`XSD no encontrado: ${xsdPath}`);
-      console.error(`Descárgalo de: https://sede.agenciatributaria.gob.es/static_files/Sede/Disenyo_registro/DR_100_199/${m.xsd}`);
-      process.exit(1);
-    }
+    if (m.format === "xml") {
+      const xsdPath = join(dataDir(), m.xsd!);
+      if (!existsSync(xsdPath)) {
+        console.error(`XSD no encontrado: ${xsdPath}`);
+        process.exit(1);
+      }
 
-    console.log(`Validando ${xmlFile} contra ${m.xsd}...`);
-    try {
-      const result = execSync(`xmllint --schema "${xsdPath}" "${xmlFile}" --noout 2>&1`).toString();
-      console.log("✓ XML válido.");
-      if (result.trim()) console.log(result);
-    } catch (e: any) {
-      const output = e.stdout?.toString() || e.stderr?.toString() || e.message;
-      console.log("✗ Errores de validación:\n");
-      console.log(output);
-      process.exit(1);
+      console.log(`Validando ${file} contra ${m.xsd}...`);
+      try {
+        const result = execSync(`xmllint --schema "${xsdPath}" "${file}" --noout 2>&1`).toString();
+        console.log("✓ XML válido.");
+        if (result.trim()) console.log(result);
+      } catch (e: any) {
+        const output = e.stdout?.toString() || e.stderr?.toString() || e.message;
+        console.log("✗ Errores de validación:\n");
+        console.log(output);
+        process.exit(1);
+      }
+    } else if (m.format === "boe") {
+      const { validateBoeFile } = await import("./aeat/validate-patrimonio.js");
+      const schemaPath = join(dataDir(), m.schema!);
+      console.log(`Validando ${file} contra diseño de registro ${m.schema}...`);
+      const result = validateBoeFile(file, schemaPath);
+      if (result.valid) {
+        console.log("✓ Fichero BOE válido.");
+        if (result.warnings.length > 0) {
+          for (const w of result.warnings) {
+            console.log(`  ⚠ ${w}`);
+          }
+        }
+      } else {
+        console.log("✗ Errores de validación:\n");
+        for (const e of result.errors) {
+          console.log(`  ✗ ${e}`);
+        }
+        process.exit(1);
+      }
     }
   });
 
@@ -263,26 +337,42 @@ program
       process.exit(1);
     }
 
-    const xsdPath = join(dataDir(), m.xsd);
-    const dictPath = join(dataDir(), m.dict);
-
     console.log(`Modelo ${modelo}: ${m.name}\n`);
-    console.log(`XSD:         ${existsSync(xsdPath) ? xsdPath : "NO ENCONTRADO"}`);
-    console.log(`Diccionario: ${existsSync(dictPath) ? dictPath : "NO ENCONTRADO"}`);
-    console.log(`EDFI URL:    ${m.edfiUrl}`);
-    console.log(`Renta WEB:   ${m.rentaWebUrl}`);
-    console.log(`\nFuentes AEAT:`);
-    console.log(`  XSD:  https://sede.agenciatributaria.gob.es/static_files/Sede/Disenyo_registro/DR_100_199/${m.xsd}`);
-    console.log(`  Dict: https://sede.agenciatributaria.gob.es/static_files/Sede/Disenyo_registro/DR_100_199/${m.dict}`);
+    console.log(`Formato:     ${m.format === "xml" ? "XML (ISO-8859-1)" : "BOE (texto posicional)"}`);
 
-    if (existsSync(dictPath)) {
-      const lines = readFileSync(dictPath, "latin1").split("\n").filter((l) => l.trim());
-      console.log(`\n  Campos en diccionario: ${lines.length}`);
-    }
-    if (existsSync(xsdPath)) {
-      const content = readFileSync(xsdPath, "utf8");
-      const elements = (content.match(/xs:element name=/g) || []).length;
-      console.log(`  Elementos en XSD: ${elements}`);
+    if (m.format === "xml") {
+      const xsdPath = join(dataDir(), m.xsd!);
+      const dictPath = join(dataDir(), m.dict!);
+      console.log(`XSD:         ${existsSync(xsdPath) ? xsdPath : "NO ENCONTRADO"}`);
+      console.log(`Diccionario: ${existsSync(dictPath) ? dictPath : "NO ENCONTRADO"}`);
+      console.log(`EDFI URL:    ${m.edfiUrl}`);
+      console.log(`Renta WEB:   ${m.rentaWebUrl}`);
+      console.log(`\nFuentes AEAT:`);
+      console.log(`  XSD:  https://sede.agenciatributaria.gob.es/static_files/Sede/Disenyo_registro/DR_100_199/${m.xsd}`);
+      console.log(`  Dict: https://sede.agenciatributaria.gob.es/static_files/Sede/Disenyo_registro/DR_100_199/${m.dict}`);
+
+      if (existsSync(dictPath)) {
+        const lines = readFileSync(dictPath, "latin1").split("\n").filter((l) => l.trim());
+        console.log(`\n  Campos en diccionario: ${lines.length}`);
+      }
+      if (existsSync(xsdPath)) {
+        const content = readFileSync(xsdPath, "utf8");
+        const elements = (content.match(/xs:element name=/g) || []).length;
+        console.log(`  Elementos en XSD: ${elements}`);
+      }
+    } else if (m.format === "boe") {
+      const schemaPath = join(dataDir(), m.schema!);
+      console.log(`Schema:      ${existsSync(schemaPath) ? schemaPath : "NO ENCONTRADO"}`);
+      console.log(`Patrimonio:  ${m.patrimonioWebUrl}`);
+      console.log(`\nFuentes AEAT:`);
+      console.log(`  Diseño:  https://sede.agenciatributaria.gob.es/static_files/Sede/Disenyo_registro/DR_Resto_Mod/DR714_2025.xls`);
+
+      if (existsSync(schemaPath)) {
+        const schema = JSON.parse(readFileSync(schemaPath, "utf8"));
+        const totalFields = schema.pages.reduce((sum: number, p: any) => sum + p.fields.length, 0);
+        console.log(`\n  Páginas: ${schema.pages.length}`);
+        console.log(`  Campos totales: ${totalFields}`);
+      }
     }
   });
 
