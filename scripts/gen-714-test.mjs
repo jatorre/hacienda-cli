@@ -1,11 +1,10 @@
 #!/usr/bin/env node
 // Test script to generate a minimal Modelo 714 BOE file with real data.
-// This is for testing the format and upload flow ONLY.
-// Does NOT submit the declaration.
+// For testing format and upload flow. Does NOT submit the declaration.
 
 import { generate714Boe } from "../dist/aeat/generate-patrimonio.js";
 import { validateBoeFile } from "../dist/aeat/validate-patrimonio.js";
-import { resolve, join } from "node:path";
+import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
@@ -23,13 +22,13 @@ const data = {
     tipoNumeracion: "NUM",
     numeroCasa: "36",
     codigoPostal: "28000",
-    localidad: "MADRID",
     municipio: "MADRID",
     codigoProvincia: "28",
     provincia: "MADRID",
-    nacionalidad: "1", // española
-    regimenMatrimonio: "6", // separación de bienes (asumido, cambiar si corresponde)
+    nacionalidad: "0", // AEAT default: no consta
+    regimenMatrimonio: "6", // separación de bienes
     codigoCA: "12", // Madrid
+    tipoDeclaracion: "N", // negativa/saldo cero
   },
   viviendaHabitual: {
     clave: "P", // propiedad
@@ -58,14 +57,16 @@ if (result.valid) {
 } else {
   console.log("✗ Errores:");
   for (const e of result.errors) console.log(`  ✗ ${e}`);
-  if (result.warnings.length > 0) {
-    for (const w of result.warnings) console.log(`  ⚠ ${w}`);
-  }
 }
 
-// Print hex dump of first 200 bytes and page 01 header region
-console.log("\nPrimeros 100 bytes (envelope + inicio AUX):");
-console.log(buf.slice(0, 100).toString("latin1"));
-
-console.log("\nInicio de página 01 (pos 329 onwards, first 200 bytes):");
-console.log(buf.slice(328, 528).toString("latin1"));
+console.log("\n=== Verificación de posiciones clave (página 01) ===");
+const content = buf.toString("latin1");
+const p01Start = content.indexOf("<T71401000>");
+const p01 = content.slice(p01Start, p01Start + 1100);
+console.log(`Pos 13 (Tipo decl.):       [${p01[12]}]`);
+console.log(`Pos 14-22 (NIF):           [${p01.slice(13, 22)}]`);
+console.log(`Pos 662 (Nacionalidad):    [${p01[661]}]`);
+console.log(`Pos 688-700 (Justificante):[${p01.slice(687, 700)}]`);
+console.log(`Pos 701 (Régimen matrim):  [${p01[700]}]`);
+console.log(`Pos 702-703 (CA):          [${p01.slice(701, 703)}]`);
+console.log(`Pos 704 (Decl. comp):      [${p01[703]}]`);

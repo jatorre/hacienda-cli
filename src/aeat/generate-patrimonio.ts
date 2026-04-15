@@ -14,40 +14,30 @@ export interface DeclaranteData {
   tipoNumeracion: string; // NUM, KM, etc
   numeroCasa: string;
   codigoPostal: string;
-  localidad: string;
+  /** Municipio (AEAT usa este campo para "MADRID", no localidad). */
   municipio: string;
   codigoProvincia: string; // "01" to "52"
   provincia: string;
-  nacionalidad: "0" | "1" | "2"; // 0=no consta, 1=española, 2=otra
+  nacionalidad?: "0" | "1" | "2"; // AEAT default is "0" (no consta)
   regimenMatrimonio?: "5" | "6" | "7"; // 5=gananciales, 6=separación, 7=otro
-  codigoCA: string; // "01" to "19"
-  fechaDeclaracionLocalidad?: string;
-  fechaDeclaracionDia?: string;
-  fechaDeclaracionMes?: string;
-  fechaDeclaracionAnyo?: string;
+  codigoCA: string; // "01" to "19" (Madrid=12)
+  /** Tipo de declaración: "I"=Ingreso, "N"=Negativa/saldo cero, "U"=Domiciliación, "T"=Transferencia. Required. */
+  tipoDeclaracion?: "I" | "N" | "U" | "T";
 }
 
 export interface ViviendaHabitual {
   clave: "P" | "U"; // P=propiedad, U=usufructo
   porcentajeTitularidad: number; // 0-100, 2 decimals
   referenciaCatastral: string;
-  situacion: "1" | "2" | "3" | "4" | "5"; // 1=en territorio nacional excepto País Vasco/Navarra
-  valorUtilizado: "V" | "A" | "P" | "C"; // V=valor catastral, A=admin, P=precio adq, C=construcción
+  situacion: "1" | "2" | "3" | "4" | "5";
+  valorUtilizado: "V" | "A" | "P" | "C";
   direccion: string;
   valorComputar: number; // euros
-}
-
-export interface Deposito {
-  descripcion: string; // tipo y entidad
-  saldo31Dic: number;
-  saldoMedio?: number;
 }
 
 export interface Declaracion714Data {
   declarante: DeclaranteData;
   viviendaHabitual?: ViviendaHabitual;
-  depositos?: Deposito[];
-  // Add more sections as needed
 }
 
 const PAGE_LENGTHS: Record<string, number> = {
@@ -66,13 +56,12 @@ const PAGE_LENGTHS: Record<string, number> = {
 
 function buildPage(pageNum: string, length: number): BoeBuffer {
   const buf = new BoeBuffer(length);
-  // Wrapper fields common to all pages
   buf.writeConstant(1, "<T");
   buf.write(3, 3, "714", "Num");
   buf.writeConstant(6, `${pageNum}000`);
   buf.writeConstant(11, ">");
   // Indicador de página complementaria (pos 12) — blank by default
-  // End marker will be written last
+  // End marker
   buf.writeConstant(length - 11, `</T714${pageNum}000>`);
   return buf;
 }
@@ -80,8 +69,9 @@ function buildPage(pageNum: string, length: number): BoeBuffer {
 function buildPage01(data: DeclaranteData): Buffer {
   const p = buildPage("01", PAGE_LENGTHS["01"]);
 
-  // Tipo declaración — blank for now (could be "I" for ingreso, "U" domiciliación, etc)
-  // pos 13, len 1
+  // Tipo de declaración (pos 13, len 1) — OBLIGATORIO según AEAT.
+  // "N" (Negativa/saldo cero) por defecto.
+  p.write(13, 1, data.tipoDeclaracion ?? "N", "A");
 
   // NIF (pos 14, len 9)
   p.write(14, 9, data.nif.toUpperCase(), "An");
@@ -89,10 +79,10 @@ function buildPage01(data: DeclaranteData): Buffer {
   // Apellidos y nombre (pos 23, len 80)
   p.write(23, 80, normalizeString(data.apellidosNombre), "A");
 
-  // Ejercicio (pos 103, len 4) — constant 2025
+  // Ejercicio (pos 103, len 4)
   p.write(103, 4, "2025", "Num");
 
-  // Periodo (pos 107, len 2) — constant 0A
+  // Periodo (pos 107, len 2)
   p.writeConstant(107, "0A");
 
   // Sexo (pos 109, len 1)
@@ -104,19 +94,34 @@ function buildPage01(data: DeclaranteData): Buffer {
   // Fecha nacimiento (pos 111, len 8) DDMMYYYY
   p.write(111, 8, data.fechaNacimiento, "Num");
 
+  // Discapacidad % (pos 119, len 2) — Num, ceros si no aplica
+  p.write(119, 2, "0", "Num");
+
+  // Clase discapacidad (pos 121, len 1) — Num, cero si no aplica
+  p.write(121, 1, "0", "Num");
+
   // Domicilio
-  p.write(122, 5, data.tipoVia.toUpperCase(), "A"); // Tipo vía
+  p.write(122, 5, data.tipoVia.toUpperCase(), "A"); // Tipo vía (A = uppercase)
+
+  // Código municipio INE (pos 127, len 5) — Num, ceros si no aplica
+  p.write(127, 5, "0", "Num");
+
   p.write(132, 50, normalizeString(data.nombreVia), "An"); // Nombre vía
   p.write(182, 3, data.tipoNumeracion.toUpperCase(), "An"); // Tipo numeración
   if (data.numeroCasa) {
     p.write(185, 5, data.numeroCasa, "Num"); // Número casa
   }
+
+  // Localidad (pos 248, len 30) — AEAT lo deja vacío, el dato va en Municipio
+  // (no escribimos nada, queda en blancos por defecto)
+
   if (data.codigoPostal) {
     p.write(278, 5, data.codigoPostal, "Num"); // CP
   }
-  if (data.localidad) {
-    p.write(248, 30, normalizeString(data.localidad), "An"); // Localidad
-  }
+
+  // Código postal reservado AEAT (pos 283, len 5) — Num, ceros
+  p.write(283, 5, "0", "Num");
+
   if (data.municipio) {
     p.write(288, 30, normalizeString(data.municipio), "An"); // Municipio
   }
@@ -127,13 +132,19 @@ function buildPage01(data: DeclaranteData): Buffer {
     p.write(320, 20, normalizeString(data.provincia), "An");
   }
 
-  // Nacionalidad (pos 662, len 1)
-  p.write(662, 1, data.nacionalidad, "Num");
+  // Nacionalidad (pos 662, len 1) — Num, "0" si no consta
+  p.write(662, 1, data.nacionalidad ?? "0", "Num");
 
-  // N.º Justificante (pos 688, len 13) — zeros
+  // Modalidades especiales tributación (pos 663-667, 5 chars total) — Num, ceros
+  p.write(663, 1, "0", "Num"); // residencia fuera de España
+  p.write(664, 1, "0", "Num"); // dejó de ser residente
+  p.write(665, 2, "0", "Num"); // CA mayor bienes
+  p.write(667, 1, "0", "Num"); // régimen especial art. 93 IRPF
+
+  // N.º Justificante (pos 688, len 13) — Num, ceros
   p.write(688, 13, "0", "Num");
 
-  // Régimen matrimonio (pos 701, len 1)
+  // Régimen matrimonio (pos 701, len 1) — "5" gananciales, "6" separación, "7" otro
   if (data.regimenMatrimonio) {
     p.write(701, 1, data.regimenMatrimonio, "An");
   }
@@ -141,22 +152,17 @@ function buildPage01(data: DeclaranteData): Buffer {
   // CA residencia (pos 702, len 2)
   p.write(702, 2, data.codigoCA, "Num");
 
-  // Declaración complementaria (pos 704, len 1) — 0
+  // Declaración complementaria (pos 704, len 1) — Num, "0" por defecto
   p.write(704, 1, "0", "Num");
 
-  // Fecha declaración
-  if (data.fechaDeclaracionLocalidad) {
-    p.write(746, 20, normalizeString(data.fechaDeclaracionLocalidad), "An");
-  }
-  if (data.fechaDeclaracionDia) {
-    p.write(766, 2, data.fechaDeclaracionDia, "Num");
-  }
-  if (data.fechaDeclaracionMes) {
-    p.write(768, 10, data.fechaDeclaracionMes.toUpperCase(), "A");
-  }
-  if (data.fechaDeclaracionAnyo) {
-    p.write(778, 4, data.fechaDeclaracionAnyo, "Num");
-  }
+  // Fecha declaración (todos Num, rellenar con ceros)
+  p.write(766, 2, "0", "Num"); // Día
+  p.write(778, 4, "0", "Num"); // Año
+
+  // Campos reservados numéricos (pos 816-829, 14 chars) — Num, ceros
+  // Estos aparecen como ceros en el export de AEAT
+  p.write(816, 1, "0", "Num");
+  p.write(817, 13, "0", "Num");
 
   return p.toBuffer();
 }
@@ -168,82 +174,77 @@ function buildPage02(vivienda?: ViviendaHabitual): Buffer {
     return p.toBuffer();
   }
 
-  // A1 Vivienda habitual — First entry starts at pos 14
-  // Layout per entry (8 fields per entry, 37 bytes each):
-  //   Clave (1), % Titularidad (5), Ref catastral (20), Situación (1), Valor utilizado (1), Dirección (33), Valor (13)
-  // First entry starts at pos 14
+  p.write(14, 1, vivienda.clave, "A");
 
-  p.write(14, 1, vivienda.clave, "A"); // Clave P/U
-
-  // % Titularidad — 5 chars numeric, interpreted as XXX.XX (e.g., 10000 = 100.00%)
+  // % Titularidad — 5 chars numeric, XXXYY (e.g., 10000 = 100.00%)
   const pctStr = Math.round(vivienda.porcentajeTitularidad * 100).toString().padStart(5, "0");
   p.writeConstant(15, pctStr);
 
-  p.write(20, 20, vivienda.referenciaCatastral.toUpperCase(), "An"); // Ref catastral
-  p.write(40, 1, vivienda.situacion, "Num"); // Situación
-  p.write(41, 1, vivienda.valorUtilizado, "A"); // Valor utilizado
-  p.write(42, 33, normalizeString(vivienda.direccion), "An"); // Dirección
-
-  // Valor a computar (pos 75, len 13) — Amount in cents, right-aligned zero-padded
+  p.write(20, 20, vivienda.referenciaCatastral.toUpperCase(), "An");
+  p.write(40, 1, vivienda.situacion, "Num");
+  p.write(41, 1, vivienda.valorUtilizado, "A");
+  p.write(42, 33, normalizeString(vivienda.direccion), "An");
   p.write(75, 13, vivienda.valorComputar, "N");
 
-  // Subtotal fields at end of A1 (positions 310, 323, 336)
-  // These are totals that EDFI/Patrimonio WEB typically recalculates
-  p.write(310, 13, vivienda.valorComputar, "N"); // Total A1 susceptible exención
-
-  return p.toBuffer();
-}
-
-function buildPage04(depositos?: Deposito[]): Buffer {
-  const p = buildPage("04", PAGE_LENGTHS["04"]);
-
-  if (!depositos || depositos.length === 0) {
-    return p.toBuffer();
-  }
-
-  // D. Bienes exentos afectos (pos 14-202, 12 entries × ~15.75 bytes) — skip
-  // E. Depósitos bancarios (pos ~300+, 72 entries × ~40 bytes approx)
-  // For now, a minimal placeholder — actual positions depend on schema extraction
+  // Subtotal fields at end of A1 (pos 310, 13 bytes)
+  p.write(310, 13, vivienda.valorComputar, "N");
 
   return p.toBuffer();
 }
 
 function buildPage09(): Buffer {
-  // Resumen patrimonio neto — minimal, let server calculate
-  return buildPage("09", PAGE_LENGTHS["09"]).toBuffer();
+  const p = buildPage("09", PAGE_LENGTHS["09"]);
+  // Fill all numeric positions with zeros. AEAT's export shows many consecutive zeros here.
+  // For a minimal declaration with no wealth tax due (Madrid bonus), most fields are zero.
+  // We fill positions 13 to 432 with zeros (approximate based on AEAT export).
+  // This is conservative — the server will recalculate anyway.
+  for (let i = 13; i <= 432; i++) {
+    p.write(i, 1, "0", "Num");
+  }
+  return p.toBuffer();
 }
 
 function buildPage10(): Buffer {
-  // Liquidación — minimal
-  return buildPage("10", PAGE_LENGTHS["10"]).toBuffer();
+  const p = buildPage("10", PAGE_LENGTHS["10"]);
+  // Fill numeric positions with zeros
+  for (let i = 13; i <= 350; i++) {
+    p.write(i, 1, "0", "Num");
+  }
+  return p.toBuffer();
 }
 
 function buildPage11(): Buffer {
-  // Ingreso/Devolución — minimal
-  return buildPage("11", PAGE_LENGTHS["11"]).toBuffer();
+  const p = buildPage("11", PAGE_LENGTHS["11"]);
+  // Document of income/devolution — for negativa/saldo cero, tipo=1 in pos 139
+  // Fill leading numeric positions with zeros (AEAT shows ~95 zeros at start)
+  for (let i = 13; i <= 108; i++) {
+    p.write(i, 1, "0", "Num");
+  }
+  // "1" at pos 139 indicates negativa/saldo cero based on AEAT export
+  p.write(139, 1, "1", "Num");
+  return p.toBuffer();
 }
 
 function buildEnvelope(pages: Buffer[]): Buffer {
-  // Envelope: <T714020250A0000><AUX>[30 blanks][idioma][...] [padding] </AUX>[pages]</T714020250A0000>
-  // According to page 00 spec:
+  // Envelope structure per page 00 spec:
   // Pos 1:  "<T714020250A0000>" (17 bytes)
   // Pos 18: "<AUX>" (5 bytes)
-  // Pos 23-52: 30 blanks
+  // Pos 23-52: 30 blanks (RESERVADO AEAT)
   // Pos 53: Idioma (1 byte)
   // Pos 54-92: 39 blanks
   // Pos 93-96: Versión programa (4 bytes)
   // Pos 97-100: 4 blanks
   // Pos 101-109: NIF empresa desarrollo (9 bytes)
   // Pos 110-322: 213 blanks
-  // Pos 323: "</AUX>" (6 bytes)
+  // Pos 323: "</AUX>" (6 bytes) — ends at pos 328
   // Pos 329 onwards: page content
   // Ends with "</T714020250A0000>" (18 bytes)
 
   const header = Buffer.alloc(328, 0x20);
-  Buffer.from("<T714020250A0000>", "latin1").copy(header, 0); // 17 bytes
-  Buffer.from("<AUX>", "latin1").copy(header, 17); // 5 bytes, ends at pos 22
+  Buffer.from("<T714020250A0000>", "latin1").copy(header, 0);
+  Buffer.from("<AUX>", "latin1").copy(header, 17);
   // Idioma (pos 53, 0-indexed 52)
-  Buffer.from("E", "latin1").copy(header, 52); // E = Castellano
+  Buffer.from("E", "latin1").copy(header, 52);
   // Versión programa (pos 93, 0-indexed 92)
   Buffer.from("1.00", "latin1").copy(header, 92);
   // </AUX> at pos 323 (0-indexed 322)
@@ -254,64 +255,34 @@ function buildEnvelope(pages: Buffer[]): Buffer {
   return Buffer.concat([header, ...pages, footer]);
 }
 
+/**
+ * Generates a BOE-format Modelo 714 file.
+ *
+ * Key AEAT learnings from empirical testing:
+ * - Only include pages that have data. AEAT's own export includes only pages
+ *   01, 09, 10, 11 for a minimal declaration. Including empty pages 02-08
+ *   may cause parser errors.
+ * - Numeric fields must be filled with "0" when not used, NOT blanks.
+ * - Tipo de declaración (pos 13) is mandatory: "N" for negativa/saldo cero.
+ * - Fields for pages 09-11 should be pre-filled with zeros; the server recalculates.
+ */
 export function generate714Boe(data: Declaracion714Data, outPath: string): Buffer {
   const page01 = buildPage01(data.declarante);
-  const page02 = buildPage02(data.viviendaHabitual);
-  const page04 = buildPage04(data.depositos);
   const page09 = buildPage09();
   const page10 = buildPage10();
   const page11 = buildPage11();
 
-  // Pages 03, 05, 06, 07, 08 are empty for this minimal declaration
-  const page03 = new BoeBuffer(PAGE_LENGTHS["03"]);
-  page03.writeConstant(1, "<T");
-  page03.write(3, 3, "714", "Num");
-  page03.writeConstant(6, "03000");
-  page03.writeConstant(11, ">");
-  page03.writeConstant(PAGE_LENGTHS["03"] - 11, "</T71403000>");
+  const pages: Buffer[] = [page01];
 
-  const page05 = new BoeBuffer(PAGE_LENGTHS["05"]);
-  page05.writeConstant(1, "<T");
-  page05.write(3, 3, "714", "Num");
-  page05.writeConstant(6, "05000");
-  page05.writeConstant(11, ">");
-  page05.writeConstant(PAGE_LENGTHS["05"] - 11, "</T71405000>");
+  // Page 02 only if we have vivienda habitual or any inmueble data
+  if (data.viviendaHabitual) {
+    pages.push(buildPage02(data.viviendaHabitual));
+  }
 
-  const page06 = new BoeBuffer(PAGE_LENGTHS["06"]);
-  page06.writeConstant(1, "<T");
-  page06.write(3, 3, "714", "Num");
-  page06.writeConstant(6, "06000");
-  page06.writeConstant(11, ">");
-  page06.writeConstant(PAGE_LENGTHS["06"] - 11, "</T71406000>");
+  // Pages 09, 10, 11 are always included (summary/liquidation/document)
+  pages.push(page09, page10, page11);
 
-  const page07 = new BoeBuffer(PAGE_LENGTHS["07"]);
-  page07.writeConstant(1, "<T");
-  page07.write(3, 3, "714", "Num");
-  page07.writeConstant(6, "07000");
-  page07.writeConstant(11, ">");
-  page07.writeConstant(PAGE_LENGTHS["07"] - 11, "</T71407000>");
-
-  const page08 = new BoeBuffer(PAGE_LENGTHS["08"]);
-  page08.writeConstant(1, "<T");
-  page08.write(3, 3, "714", "Num");
-  page08.writeConstant(6, "08000");
-  page08.writeConstant(11, ">");
-  page08.writeConstant(PAGE_LENGTHS["08"] - 11, "</T71408000>");
-
-  const envelope = buildEnvelope([
-    page01,
-    page02,
-    page03.toBuffer(),
-    page04,
-    page05.toBuffer(),
-    page06.toBuffer(),
-    page07.toBuffer(),
-    page08.toBuffer(),
-    page09,
-    page10,
-    page11,
-  ]);
-
+  const envelope = buildEnvelope(pages);
   writeFileSync(outPath, envelope);
   return envelope;
 }

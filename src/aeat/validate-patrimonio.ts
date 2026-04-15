@@ -60,23 +60,13 @@ export function validateBoeFile(filePath: string, schemaPath: string): Validatio
     pages.push(match[1]);
   }
 
-  const expectedPages = [
-    "01000",
-    "02000",
-    "03000",
-    "04000",
-    "05000",
-    "06000",
-    "07000",
-    "08000",
-    "09000",
-    "10000",
-    "11000",
-  ];
-
-  for (const ep of expectedPages) {
-    if (!pages.includes(ep)) {
-      warnings.push(`Página ${ep} no encontrada en el fichero`);
+  // Only pages 01, 09, 10, 11 are required (datos identificativos, resumen,
+  // liquidación, documento de ingreso). Pages 02-08 (bienes y derechos) are
+  // included only if there's data in those sections.
+  const requiredPages = ["01000", "09000", "10000", "11000"];
+  for (const rp of requiredPages) {
+    if (!pages.includes(rp)) {
+      errors.push(`Página obligatoria ${rp} no encontrada`);
     }
   }
 
