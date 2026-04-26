@@ -2,6 +2,7 @@ export const AEAT_UPLOAD_CODES = /^(FRECH|ERES|EXML|AVIS)/;
 
 export const aeatSelectors = {
   continueSession: 'button:has-text("Continuar sesión")',
+  datosIdentificativosHeader: "text=Datos Identificativos",
   fiscalDataHeader: "text=Consulta de Datos Fiscales",
   importXml: 'button:has-text("Importar XML"), button:has-text("Importar Xml"), a:has-text("Importar XML"), a:has-text("Importar Xml")',
   newDeclaration: 'button:has-text("Nueva declaración")',
