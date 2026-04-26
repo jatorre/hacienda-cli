@@ -9,7 +9,7 @@ import { join, resolve } from "node:path";
 import { execSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
-import { downloadModelo100Artifacts } from "./aeat/download.js";
+import { downloadModelo100Artifacts, UserActionRequiredError } from "./aeat/download.js";
 import { uploadXmlToEdfi } from "./aeat/upload.js";
 
 const program = new Command();
@@ -99,11 +99,14 @@ program
     if (status.authenticated) {
       console.log("✓ Sesión autenticada.");
       console.log(`  URL: ${status.currentUrl}`);
-      console.log("\n  Navegador abierto. Los demás comandos se conectan a él.");
-      console.log("  Ciérralo con Ctrl+C cuando termines.\n");
-      console.log("  Comandos disponibles (en otra terminal):");
-      console.log("    hacienda download 100    # descarga borrador PDF");
-      console.log("    hacienda upload 100 f.xml # importa XML en EDFI");
+      console.log("\n  ⚠  MANTÉN ESTA TERMINAL ABIERTA.");
+      console.log("  Este proceso mantiene viva la sesión del navegador.");
+      console.log("  Si haces Ctrl+C o cierras esta pestaña, perderás el login");
+      console.log("  y tendrás que volver a autenticarte con Cl@ve.\n");
+      console.log("  Abre OTRA pestaña de terminal (Cmd+T en Mac) para ejecutar:");
+      console.log("    hacienda download 100      # descarga borrador PDF");
+      console.log("    hacienda upload 100 f.xml  # importa XML en EDFI\n");
+      console.log("  Cuando hayas terminado todos los comandos, pulsa Ctrl+C aquí para cerrar.");
     } else {
       console.log("✗ No se detectó sesión. Verifica tu login.");
     }
@@ -147,7 +150,11 @@ program
       htmlFile = result.htmlFile;
       pdfFile = result.pdfFile;
     } catch (error: any) {
-      console.error(`✗ ${error.message}`);
+      if (error instanceof UserActionRequiredError) {
+        console.error(`\nℹ  Atención: ${error.message}\n`);
+      } else {
+        console.error(`✗ ${error.message}`);
+      }
       process.exit(1);
     }
 
