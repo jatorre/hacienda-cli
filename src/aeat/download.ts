@@ -4,6 +4,15 @@ import type { Page } from "playwright";
 
 import { aeatSelectors, aeatSessionExpiredPattern } from "./selectors.js";
 
+// Error que indica al usuario que tiene que hacer algo manualmente.
+// El entry point lo presenta como "ℹ Atención" en vez de "✗".
+export class UserActionRequiredError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "UserActionRequiredError";
+  }
+}
+
 export async function downloadModelo100Artifacts(args: {
   page: Page;
   modelo: string;
@@ -54,7 +63,8 @@ export async function downloadModelo100Artifacts(args: {
       nuevaDecl.waitFor({ state: "visible", timeout: 10000 }),
     ]);
   } catch {
-    // Puede que ya estemos en el resumen directamente.
+    // Puede que ya estemos en el resumen directamente, o stuck en una
+    // pantalla de configuración inicial (primera vez de la campaña).
   }
 
   if (await continuar.isVisible().catch(() => false)) {
@@ -63,6 +73,22 @@ export async function downloadModelo100Artifacts(args: {
   } else if (await nuevaDecl.isVisible().catch(() => false)) {
     console.log("Iniciando nueva declaración...");
     await nuevaDecl.click();
+  } else {
+    // Primera vez de la campaña: la AEAT muestra pantallas de configuración
+    // inicial (Datos Identificativos, datos trasladables, etc.) que requieren
+    // decisiones del usuario y no se pueden automatizar. Detectamos por la
+    // presencia de la cabecera "Datos Identificativos" en primer plano (sin
+    // modal de Continuar/Nueva por encima).
+    const datosIdent = page.locator(aeatSelectors.datosIdentificativosHeader);
+    if (await datosIdent.isVisible().catch(() => false)) {
+      throw new UserActionRequiredError(
+        "Primera vez de la campaña: la AEAT muestra una serie de pantallas de configuración inicial " +
+          "(Datos Identificativos, Datos trasladables, etc.) que requieren decisiones del usuario y " +
+          "no se pueden automatizar. Completa esos formularios manualmente en el navegador hasta " +
+          "llegar al borrador, y vuelve a ejecutar 'hacienda download 100'. " +
+          "Solo es necesario una vez por campaña.",
+      );
+    }
   }
 
   console.log("Esperando a que cargue el borrador...");
