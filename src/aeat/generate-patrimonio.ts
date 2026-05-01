@@ -14,7 +14,7 @@ export interface DeclaranteData {
   tipoNumeracion: string; // NUM, KM, etc
   numeroCasa: string;
   codigoPostal: string;
-  /** Municipio (AEAT usa este campo para "MADRID", no localidad). */
+  /** Municipio (AEAT usa este campo para el nombre del municipio, no localidad). */
   municipio: string;
   codigoProvincia: string; // "01" to "52"
   provincia: string;

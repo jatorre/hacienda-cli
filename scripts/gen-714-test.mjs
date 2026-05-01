@@ -20,7 +20,7 @@ const data = {
     tipoVia: "CALLE",
     nombreVia: "EJEMPLO",
     tipoNumeracion: "NUM",
-    numeroCasa: "36",
+    numeroCasa: "1",
     codigoPostal: "28000",
     municipio: "MADRID",
     codigoProvincia: "28",
@@ -36,7 +36,7 @@ const data = {
     referenciaCatastral: "0000000XX0000X0000XX",
     situacion: "1", // territorio nacional
     valorUtilizado: "P", // precio de adquisición
-    direccion: "CL EJEMPLO 36 MADRID",
+    direccion: "CL EJEMPLO 1 MADRID",
     valorComputar: 100000.0,
   },
 };
